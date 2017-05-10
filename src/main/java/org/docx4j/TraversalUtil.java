@@ -116,7 +116,8 @@ public class TraversalUtil {
 
 				Object o2;
 				for (Object o : children) {
-										
+					
+					// In 3.3.4, we don't expect to do any parent fixes here.
 					if (o instanceof javax.xml.bind.JAXBElement) {
 						// get its value; this is ok, 
 						// provided the results of the Callback
@@ -136,14 +137,71 @@ public class TraversalUtil {
 									}
 								}
 							} else {
-								// workaround for broken getParent in cases where ArrayListWml doesn't help
-								// (ie we're not in a content list)
-								((Child)o2).setParent(parent);
+								
+								if (parent==((Child)o2).getParent()) {
+									// all good
+									
+								} else {
+									
+									// workaround for broken getParent in cases where ArrayListWml doesn't help
+									// (ie we're not in a content list)
+									if ( ((Child)o2).getParent()==null) {
+										
+										// 3.3.4: to setParent, or not?
+										// Yes, let's, since something is better than null.
+										// But note, we could be setting it to some other ancestor because of how getChildren works
+										// When does this ever happen? Log at warn level to find out..
+										// I think it would only ever happen if there was foo.setBar(JAXBElement z)
+										if (log.isWarnEnabled()) {
+											log.warn("Unknown parent for " + o2.getClass().getName());
+										}
+										((Child)o2).setParent(parent);
+										
+									} else  {
+										// If this happens, we need to understand why
+										if (log.isWarnEnabled()) {
+											log.warn("Parent of " + o2.getClass().getName()
+													+ " is currently " + ((Child)o2).getParent().getClass().getName());
+										}
+										// We don't things in this case
+										//((Child)o2).setParent(parent);									
+									}
+									if (log.isInfoEnabled()) {
+										log.info("setting to  " + parent.getClass().getName() );
+									}
+									
+								}
+								
+								
 							}
 						}
 						
-					} else /* not wrapped in JAXBElement, so getParent should be OK */ {
+					} else /* not wrapped in JAXBElement, so getParent should be OK.  We never change in this case. */ {
 						o2 = o;
+						if (log.isDebugEnabled()) {
+							
+							if (o2 instanceof Child) {
+								if (((Child) o2).getParent() == null) {
+
+									log.debug("Unknown parent for "
+											+ o2.getClass().getName());
+									
+								} else if (parent != ((Child) o2).getParent()) {
+									
+									// This can happen because getChildren() skips layers,
+									// so the 'parent' passed in here might actually be the grandparent
+									log.info("Parent of "
+											+ o2.getClass().getName()
+											+ " is currently "
+											+ ((Child) o2).getParent().getClass()
+													.getName());
+								}
+							} else {
+								log.info(o2.getClass().getName() + " not an instanceof Child!");
+								// eg org.docx4j.wml.STFldCharType								
+							}
+							
+						}
 					}										
 					
 					this.apply(o2);
@@ -244,6 +302,13 @@ public class TraversalUtil {
 	}
 	
 	
+	/**
+	 * Get the children of some docx content object
+	 * (as opposed to pptx, xlsx content).
+	 * 
+	 * @param o
+	 * @return
+	 */
 	public static List<Object> getChildrenImpl(Object o) {
 		
 		if (o==null) {
@@ -258,16 +323,32 @@ public class TraversalUtil {
 		if (o instanceof List) {
 			// Handy if you have your own list of objects you wish to process
 			return (List<Object>) o;
+			
+		} else if (o instanceof org.docx4j.wml.Document) {
+			// since 3.3.4, so traverse visits Body as well.  This is more correct, and potentially useful.
+            List<Object> artificialList = new ArrayList<Object>();
+            artificialList.add( ((org.docx4j.wml.Document)o).getBody() );
+            return artificialList;
+			
 		} else if (o instanceof org.docx4j.wml.ContentAccessor) {
 			return ((org.docx4j.wml.ContentAccessor) o).getContent();
 			
+//		} else if (o instanceof org.docx4j.wml.SdtElement) {
+//			if (((org.docx4j.wml.SdtElement) o).getSdtContent()!=null) {
+//				return ((org.docx4j.wml.SdtElement) o).getSdtContent().getContent();
+//			} else {
+//				log.warn("SdtElement is missing content element");
+//				return null;						
+//			}		
 		} else if (o instanceof org.docx4j.wml.SdtElement) {
-			if (((org.docx4j.wml.SdtElement) o).getSdtContent()!=null) {
-				return ((org.docx4j.wml.SdtElement) o).getSdtContent().getContent();
-			} else {
-				log.warn("SdtElement is missing content element");
-				return null;						
-			}		
+			// 3.3.4: don't just return ((org.docx4j.wml.SdtElement) o).getSdtContent().getContent()
+			// since then we're passing the grandparent as the parent,
+			// and we don't want to use that in any parent fix...
+            List<Object> artificialList = new ArrayList<Object>();
+            artificialList.add(
+            		((org.docx4j.wml.SdtElement) o).getSdtContent());
+            return artificialList;
+			
 		} else if (o instanceof org.docx4j.dml.wordprocessingDrawing.Anchor) {
             org.docx4j.dml.wordprocessingDrawing.Anchor anchor = (org.docx4j.dml.wordprocessingDrawing.Anchor) o;
             List<Object> artificialList = new ArrayList<Object>();
